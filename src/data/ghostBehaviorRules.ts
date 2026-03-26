@@ -1,0 +1,81 @@
+import type { GhostBehaviorRule } from "../types";
+
+export const ghostBehaviorRules: GhostBehaviorRule[] = [
+  {
+    ghost_id: 1,
+    behavior_id: 5,
+    effect: "supports",
+    confidence: "high",
+    notes: "Spirits are effected longer by smudge",
+  },
+  {
+    ghost_id: 1,
+    behavior_id: 4,
+    effect: "rules_out",
+    confidence: "high",
+    notes: "Spirits can't hunt before 3:00",
+  },
+  {
+    ghost_id: 2,
+    behavior_id: 1,
+    effect: "rules_out",
+    confidence: "high",
+    notes: "Wraith can't walk in salt",
+  },
+  {
+    ghost_id: 2,
+    behavior_id: 9,
+    effect: "supports",
+    confidence: "high",
+    notes: "Wraith can't walk in salt",
+  },
+  {
+    ghost_id: 27,
+    behavior_id: 6,
+    effect: "suggests",
+    confidence: "high",
+    notes: "Dayan change speed with player movement",
+  },
+  {
+    ghost_id: 27,
+    behavior_id: 3,
+    effect: "suggests",
+    confidence: "high",
+    notes: "Dayan are only female",
+  },
+  {
+    ghost_id: 5,
+    behavior_id: 3,
+    effect: "suggests",
+    confidence: "high",
+    notes: "Banshee are only female",
+  },
+  {
+    ghost_id: 7,
+    behavior_id: 2,
+    effect: "rules_out",
+    confidence: "high",
+    notes: "Mares can't turn on lights",
+  },
+  {
+    ghost_id: 14,
+    behavior_id: 7,
+    effect: "suggests",
+    confidence: "high",
+    notes: "Hantu like to turn off breaker",
+  },
+  {
+    ghost_id: 6,
+    behavior_id: 7,
+    effect: "rules_out",
+    confidence: "high",
+    notes: "Jinn will never turn breaker off",
+  },
+  {
+    ghost_id: 15,
+    behavior_id: 8,
+    effect: "rules_out",
+    confidence: "high",
+    notes: "Goryo will never change room",
+  },
+];
