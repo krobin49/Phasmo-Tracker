@@ -67,7 +67,7 @@ export default function HomePage() {
           style={{
             marginTop: 0,
             marginBottom: 20,
-            color: "#475569",
+            color: "#0f172a",
             fontSize: 14,
           }}
         >
