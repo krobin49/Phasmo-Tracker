@@ -55,11 +55,11 @@ export function evaluateGhosts({
       if (
         rule.forced &&
         rule.forced_visible_min_evidence_count !== undefined &&
-        rule.forced_visible_min_evidence_count >= evidenceGiven &&
+        evidenceGiven >= rule.forced_visible_min_evidence_count &&
         evidenceStates[rule.evidence_id] === "ruled_out"
-      ) {
-        reasons.push(`Missing forced evidence: ${evidenceName}`);
-      }
+         ) {
+       reasons.push(`Missing forced evidence: ${evidenceName}`);
+           }
     }
 
     return {
