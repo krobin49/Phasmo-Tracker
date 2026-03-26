@@ -193,19 +193,19 @@ export default function HomePage() {
   }, []);
 
   function cycleEvidenceState(id: number) {
-    setEvidenceStates((prev) => {
-      const next =
-        prev[id] === "unknown"
-          ? "confirmed"
-          : prev[id] === "confirmed"
-            ? "ruled_out"
-            : "unknown";
+  setEvidenceStates((prev): Record<number, EvidenceState> => {
+    const next: EvidenceState =
+      prev[id] === "unknown"
+        ? "confirmed"
+        : prev[id] === "confirmed"
+          ? "ruled_out"
+          : "unknown";
 
-      const updated = { ...prev, [id]: next };
-      void saveRoomState({ evidence_states: updated });
-      return updated;
-    });
-  }
+    const updated: Record<number, EvidenceState> = { ...prev, [id]: next };
+    void saveRoomState({ evidence_states: updated });
+    return updated;
+  });
+}
 
   function toggleBehavior(behaviorId: number) {
     setSelectedBehaviors((prev) => {
