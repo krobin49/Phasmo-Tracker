@@ -19,6 +19,7 @@ import { supabase } from "../lib/supabase";
 import type { EvidenceState } from "../types";
 
 type TabKey = "evidence" | "behaviors" | "speed" | "hunt";
+type GhostManualState = "unknown" | "selected" | "ruled_out";
 
 const ROOM_ID = "test-room";
 
@@ -75,6 +76,28 @@ function getPillStyle(active: boolean): React.CSSProperties {
   };
 }
 
+function getGhostCardStyle(manualState: GhostManualState): React.CSSProperties {
+  if (manualState === "selected") {
+    return {
+      border: "2px solid #2563eb",
+      background: "#eff6ff",
+    };
+  }
+
+  if (manualState === "ruled_out") {
+    return {
+      border: "2px solid #dc2626",
+      background: "#fef2f2",
+      opacity: 0.9,
+    };
+  }
+
+  return {
+    border: "1px solid #bbf7d0",
+    background: "#f0fdf4",
+  };
+}
+
 export default function HomePage() {
   const [selectedModeId, setSelectedModeId] = useState(1);
   const [activeTab, setActiveTab] = useState<TabKey>("evidence");
@@ -85,15 +108,38 @@ export default function HomePage() {
     Object.fromEntries(evidence.map((e) => [e.id, "unknown"])) as Record<number, EvidenceState>
   );
 
+  const [ghostStates, setGhostStates] = useState<Record<number, GhostManualState>>(
+    Object.fromEntries(ghosts.map((g) => [g.id, "unknown"])) as Record<number, GhostManualState>
+  );
+
   const [selectedBehaviors, setSelectedBehaviors] = useState<number[]>([]);
   const [selectedSpeedId, setSelectedSpeedId] = useState<number | null>(null);
   const [selectedHuntId, setSelectedHuntId] = useState<number | null>(null);
 
   const selectedMode = gameModes.find((m) => m.mode_id === selectedModeId)!;
 
+  function getGhostEvidenceNames(ghostId: number) {
+    return ghostEvidenceRules
+      .filter((rule) => rule.ghost_id === ghostId && rule.is_primary)
+      .map(
+        (rule) =>
+          evidence.find((e) => e.id === rule.evidence_id)?.name ?? `Evidence ${rule.evidence_id}`
+      );
+  }
+
+  function getGhostExtraEvidenceNames(ghostId: number) {
+    return ghostEvidenceRules
+      .filter((rule) => rule.ghost_id === ghostId && !rule.is_primary)
+      .map(
+        (rule) =>
+          evidence.find((e) => e.id === rule.evidence_id)?.name ?? `Evidence ${rule.evidence_id}`
+      );
+  }
+
   async function saveRoomState(next: {
     mode_id?: number;
     evidence_states?: Record<number, EvidenceState>;
+    ghost_states?: Record<number, GhostManualState>;
     selected_behaviors?: number[];
     selected_speed_id?: number | null;
     selected_hunt_id?: number | null;
@@ -130,10 +176,15 @@ export default function HomePage() {
           evidence.map((e) => [e.id, "unknown"])
         ) as Record<number, EvidenceState>;
 
+        const initialGhostStates = Object.fromEntries(
+          ghosts.map((g) => [g.id, "unknown"])
+        ) as Record<number, GhostManualState>;
+
         const { error: insertError } = await supabase.from("room_state").insert({
           room_id: ROOM_ID,
           mode_id: 1,
           evidence_states: initialEvidence,
+          ghost_states: initialGhostStates,
           selected_behaviors: [],
           selected_speed_id: null,
           selected_hunt_id: null,
@@ -149,6 +200,13 @@ export default function HomePage() {
 
       setSelectedModeId(data.mode_id ?? 1);
       setEvidenceStates(data.evidence_states ?? {});
+      setGhostStates(
+        data.ghost_states ??
+          (Object.fromEntries(ghosts.map((g) => [g.id, "unknown"])) as Record<
+            number,
+            GhostManualState
+          >)
+      );
       setSelectedBehaviors(data.selected_behaviors ?? []);
       setSelectedSpeedId(data.selected_speed_id ?? null);
       setSelectedHuntId(data.selected_hunt_id ?? null);
@@ -164,7 +222,7 @@ export default function HomePage() {
       .on(
         "postgres_changes",
         {
-          event: "UPDATE",
+          event: "*",
           schema: "public",
           table: "room_state",
           filter: `room_id=eq.${ROOM_ID}`,
@@ -173,6 +231,7 @@ export default function HomePage() {
           const row = payload.new as {
             mode_id: number;
             evidence_states: Record<number, EvidenceState>;
+            ghost_states?: Record<number, GhostManualState>;
             selected_behaviors: number[];
             selected_speed_id: number | null;
             selected_hunt_id: number | null;
@@ -180,6 +239,13 @@ export default function HomePage() {
 
           setSelectedModeId(row.mode_id ?? 1);
           setEvidenceStates(row.evidence_states ?? {});
+          setGhostStates(
+            row.ghost_states ??
+              (Object.fromEntries(ghosts.map((g) => [g.id, "unknown"])) as Record<
+                number,
+                GhostManualState
+              >)
+          );
           setSelectedBehaviors(row.selected_behaviors ?? []);
           setSelectedSpeedId(row.selected_speed_id ?? null);
           setSelectedHuntId(row.selected_hunt_id ?? null);
@@ -193,19 +259,34 @@ export default function HomePage() {
   }, []);
 
   function cycleEvidenceState(id: number) {
-  setEvidenceStates((prev): Record<number, EvidenceState> => {
-    const next: EvidenceState =
-      prev[id] === "unknown"
-        ? "confirmed"
-        : prev[id] === "confirmed"
-          ? "ruled_out"
-          : "unknown";
+    setEvidenceStates((prev): Record<number, EvidenceState> => {
+      const next: EvidenceState =
+        prev[id] === "unknown"
+          ? "confirmed"
+          : prev[id] === "confirmed"
+            ? "ruled_out"
+            : "unknown";
 
-    const updated: Record<number, EvidenceState> = { ...prev, [id]: next };
-    void saveRoomState({ evidence_states: updated });
-    return updated;
-  });
-}
+      const updated: Record<number, EvidenceState> = { ...prev, [id]: next };
+      void saveRoomState({ evidence_states: updated });
+      return updated;
+    });
+  }
+
+  function cycleGhostState(ghostId: number) {
+    setGhostStates((prev): Record<number, GhostManualState> => {
+      const next: GhostManualState =
+        prev[ghostId] === "unknown"
+          ? "selected"
+          : prev[ghostId] === "selected"
+            ? "ruled_out"
+            : "unknown";
+
+      const updated: Record<number, GhostManualState> = { ...prev, [ghostId]: next };
+      void saveRoomState({ ghost_states: updated });
+      return updated;
+    });
+  }
 
   function toggleBehavior(behaviorId: number) {
     setSelectedBehaviors((prev) => {
@@ -235,7 +316,12 @@ export default function HomePage() {
       evidence.map((e) => [e.id, "unknown"])
     ) as Record<number, EvidenceState>;
 
+    const resetGhostStates = Object.fromEntries(
+      ghosts.map((g) => [g.id, "unknown"])
+    ) as Record<number, GhostManualState>;
+
     setEvidenceStates(resetEvidence);
+    setGhostStates(resetGhostStates);
     setSelectedBehaviors([]);
     setSelectedSpeedId(null);
     setSelectedHuntId(null);
@@ -243,6 +329,7 @@ export default function HomePage() {
 
     void saveRoomState({
       evidence_states: resetEvidence,
+      ghost_states: resetGhostStates,
       selected_behaviors: [],
       selected_speed_id: null,
       selected_hunt_id: null,
@@ -291,9 +378,13 @@ export default function HomePage() {
       const behaviorScore = behaviorScores.find((b) => b.ghost_id === result.ghost.id);
       const speedScore = speedScores.find((s) => s.ghost_id === result.ghost.id);
       const huntScore = huntScores.find((h) => h.ghost_id === result.ghost.id);
+      const manualState = ghostStates[result.ghost.id] ?? "unknown";
 
       return {
         ...result,
+        manualState,
+        forcedRuledOut: manualState === "ruled_out",
+        manuallySelected: manualState === "selected",
         behaviorScore: behaviorScore?.score ?? 0,
         behaviorMatches: behaviorScore?.matches ?? [],
         behaviorRuleOutReasons: behaviorScore?.ruleOutReasons ?? [],
@@ -309,20 +400,22 @@ export default function HomePage() {
           (huntScore?.score ?? 0),
       };
     });
-  }, [evidenceResults, behaviorScores, speedScores, huntScores]);
+  }, [evidenceResults, behaviorScores, speedScores, huntScores, ghostStates]);
 
   const possibleGhosts = enrichedResults
-    .filter(
-      (r) =>
-        r.possible &&
-        r.behaviorRuleOutReasons.length === 0 &&
-        r.speedRuleOutReasons.length === 0 &&
-        r.huntRuleOutReasons.length === 0
-    )
-    .sort((a, b) => b.totalScore - a.totalScore);
+  .filter(
+    (r) =>
+      !r.forcedRuledOut &&
+      r.possible &&
+      r.behaviorRuleOutReasons.length === 0 &&
+      r.speedRuleOutReasons.length === 0 &&
+      r.huntRuleOutReasons.length === 0
+  )
+  .sort((a, b) => b.totalScore - a.totalScore);
 
   const ruledOutGhosts = enrichedResults.filter(
     (r) =>
+      r.forcedRuledOut ||
       !r.possible ||
       r.behaviorRuleOutReasons.length > 0 ||
       r.speedRuleOutReasons.length > 0 ||
@@ -883,7 +976,7 @@ export default function HomePage() {
                 <h2
                   style={{
                     margin: 0,
-                    marginBottom: 16,
+                    marginBottom: 8,
                     fontSize: 20,
                     fontWeight: 700,
                     color: "#0f172a",
@@ -891,6 +984,17 @@ export default function HomePage() {
                 >
                   Most Likely
                 </h2>
+
+                <p
+                  style={{
+                    marginTop: 0,
+                    marginBottom: 16,
+                    fontSize: 13,
+                    color: "#64748b",
+                  }}
+                >
+                  Click a ghost card to cycle manual state: unknown → selected → ruled out
+                </p>
 
                 {topGhosts.length === 0 ? (
                   <div
@@ -907,97 +1011,165 @@ export default function HomePage() {
                   </div>
                 ) : (
                   <div style={{ display: "grid", gap: 12 }}>
-                    {topGhosts.map((result) => (
-                      <div
-                        key={result.ghost.id}
-                        style={{
-                          border: "2px solid #22c55e",
-                          background: "#ecfdf5",
-                          borderRadius: 14,
-                          padding: 16,
-                        }}
-                      >
+                    {topGhosts.map((result) => {
+                      const ghostEvidence = getGhostEvidenceNames(result.ghost.id);
+                      const extraEvidence = getGhostExtraEvidenceNames(result.ghost.id);
+
+                      return (
                         <div
+                          key={result.ghost.id}
+                          onClick={() => cycleGhostState(result.ghost.id)}
                           style={{
-                            fontWeight: 800,
-                            fontSize: 18,
-                            color: "#166534",
+                            ...getGhostCardStyle(result.manualState),
+                            borderRadius: 14,
+                            padding: 16,
+                            cursor: "pointer",
                           }}
                         >
-                          {result.ghost.name}
-                        </div>
+                          <div
+                            style={{
+                              fontWeight: 800,
+                              fontSize: 18,
+                              color:
+                                result.manualState === "selected"
+                                  ? "#1d4ed8"
+                                  : result.manualState === "ruled_out"
+                                    ? "#b91c1c"
+                                    : "#166534",
+                            }}
+                          >
+                            {result.ghost.name}
+                          </div>
 
-                        <div
-                          style={{
-                            marginTop: 6,
-                            fontSize: 13,
-                            color: "#166534",
-                            fontWeight: 700,
-                          }}
-                        >
-                          Total score: {result.totalScore}
-                        </div>
+                          <div
+                            style={{
+                              marginTop: 6,
+                              fontSize: 12,
+                              fontWeight: 700,
+                              color:
+                                result.manualState === "selected"
+                                  ? "#1d4ed8"
+                                  : result.manualState === "ruled_out"
+                                    ? "#b91c1c"
+                                    : "#166534",
+                            }}
+                          >
+                            Manual: {result.manualState}
+                          </div>
 
-                        <div
-                          style={{
-                            marginTop: 4,
-                            fontSize: 12,
-                            color: "#166534",
-                          }}
-                        >
-                          Behavior: {result.behaviorScore} | Speed: {result.speedScore} | Hunt:{" "}
-                          {result.huntScore}
-                        </div>
-
-                        {result.behaviorMatches.length > 0 && (
-                          <ul
+                          <div
                             style={{
                               marginTop: 8,
-                              marginBottom: 0,
-                              paddingLeft: 18,
                               fontSize: 13,
+                              fontWeight: 700,
                               color: "#166534",
                             }}
                           >
-                            {result.behaviorMatches.map((match: string, i: number) => (
-                              <li key={`behavior-${i}`}>{match}</li>
-                            ))}
-                          </ul>
-                        )}
+                            Total score: {result.totalScore}
+                          </div>
 
-                        {result.speedMatches.length > 0 && (
-                          <ul
+                          <div
                             style={{
-                              marginTop: 8,
-                              marginBottom: 0,
-                              paddingLeft: 18,
-                              fontSize: 13,
+                              marginTop: 4,
+                              fontSize: 12,
                               color: "#166534",
                             }}
                           >
-                            {result.speedMatches.map((match: string, i: number) => (
-                              <li key={`speed-${i}`}>{match}</li>
-                            ))}
-                          </ul>
-                        )}
+                            Behavior: {result.behaviorScore} | Speed: {result.speedScore} | Hunt:{" "}
+                            {result.huntScore}
+                          </div>
 
-                        {result.huntMatches.length > 0 && (
-                          <ul
+                          <div
                             style={{
-                              marginTop: 8,
-                              marginBottom: 0,
-                              paddingLeft: 18,
-                              fontSize: 13,
-                              color: "#166534",
+                              marginTop: 10,
+                              display: "flex",
+                              gap: 6,
+                              flexWrap: "wrap",
                             }}
                           >
-                            {result.huntMatches.map((match: string, i: number) => (
-                              <li key={`hunt-${i}`}>{match}</li>
+                            {ghostEvidence.map((name) => (
+                              <span
+                                key={name}
+                                style={{
+                                  fontSize: 12,
+                                  padding: "4px 8px",
+                                  borderRadius: 999,
+                                  background: "#dcfce7",
+                                  color: "#166534",
+                                  border: "1px solid #bbf7d0",
+                                }}
+                              >
+                                {name}
+                              </span>
                             ))}
-                          </ul>
-                        )}
-                      </div>
-                    ))}
+
+                            {extraEvidence.map((name) => (
+                              <span
+                                key={name}
+                                style={{
+                                  fontSize: 12,
+                                  padding: "4px 8px",
+                                  borderRadius: 999,
+                                  background: "#fef3c7",
+                                  color: "#92400e",
+                                  border: "1px solid #fde68a",
+                                }}
+                              >
+                                Extra: {name}
+                              </span>
+                            ))}
+                          </div>
+
+                          {result.behaviorMatches.length > 0 && (
+                            <ul
+                              style={{
+                                marginTop: 8,
+                                marginBottom: 0,
+                                paddingLeft: 18,
+                                fontSize: 13,
+                                color: "#166534",
+                              }}
+                            >
+                              {result.behaviorMatches.map((match: string, i: number) => (
+                                <li key={`behavior-${i}`}>{match}</li>
+                              ))}
+                            </ul>
+                          )}
+
+                          {result.speedMatches.length > 0 && (
+                            <ul
+                              style={{
+                                marginTop: 8,
+                                marginBottom: 0,
+                                paddingLeft: 18,
+                                fontSize: 13,
+                                color: "#166534",
+                              }}
+                            >
+                              {result.speedMatches.map((match: string, i: number) => (
+                                <li key={`speed-${i}`}>{match}</li>
+                              ))}
+                            </ul>
+                          )}
+
+                          {result.huntMatches.length > 0 && (
+                            <ul
+                              style={{
+                                marginTop: 8,
+                                marginBottom: 0,
+                                paddingLeft: 18,
+                                fontSize: 13,
+                                color: "#166534",
+                              }}
+                            >
+                              {result.huntMatches.map((match: string, i: number) => (
+                                <li key={`hunt-${i}`}>{match}</li>
+                              ))}
+                            </ul>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
                 )}
               </div>
@@ -1019,7 +1191,7 @@ export default function HomePage() {
                   alignItems: "center",
                   flexWrap: "wrap",
                   gap: 12,
-                  marginBottom: 16,
+                  marginBottom: 8,
                 }}
               >
                 <h2
@@ -1047,6 +1219,17 @@ export default function HomePage() {
                 </div>
               </div>
 
+              <p
+                style={{
+                  marginTop: 0,
+                  marginBottom: 16,
+                  fontSize: 13,
+                  color: "#64748b",
+                }}
+              >
+                Click a ghost card to cycle manual state: unknown → selected → ruled out
+              </p>
+
               {possibleGhosts.length === 0 ? (
                 <div
                   style={{
@@ -1064,111 +1247,169 @@ export default function HomePage() {
                 <div
                   style={{
                     display: "grid",
-                    gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+                    gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
                     gap: 12,
                   }}
                 >
-                  {possibleGhosts.map((result) => (
-                    <div
-                      key={result.ghost.id}
-                      style={{
-                        border: "1px solid #bbf7d0",
-                        background: "#f0fdf4",
-                        borderRadius: 14,
-                        padding: 14,
-                      }}
-                    >
+                  {possibleGhosts.map((result) => {
+                    const ghostEvidence = getGhostEvidenceNames(result.ghost.id);
+                    const extraEvidence = getGhostExtraEvidenceNames(result.ghost.id);
+
+                    return (
                       <div
+                        key={result.ghost.id}
+                        onClick={() => cycleGhostState(result.ghost.id)}
                         style={{
-                          fontWeight: 800,
-                          color: "#166534",
-                          fontSize: 16,
+                          ...getGhostCardStyle(result.manualState),
+                          borderRadius: 14,
+                          padding: 14,
+                          cursor: "pointer",
                         }}
                       >
-                        {result.ghost.name}
-                      </div>
-
-                      <div
-                        style={{
-                          marginTop: 6,
-                          fontSize: 13,
-                          color: "#15803d",
-                        }}
-                      >
-                        Still possible
-                      </div>
-
-                      <div
-                        style={{
-                          marginTop: 8,
-                          fontSize: 13,
-                          color: "#166534",
-                          fontWeight: 700,
-                        }}
-                      >
-                        Total score: {result.totalScore}
-                      </div>
-
-                      <div
-                        style={{
-                          marginTop: 4,
-                          fontSize: 12,
-                          color: "#166534",
-                        }}
-                      >
-                        Behavior: {result.behaviorScore} | Speed: {result.speedScore} | Hunt:{" "}
-                        {result.huntScore}
-                      </div>
-
-                      {result.behaviorMatches.length > 0 && (
-                        <ul
+                        <div
                           style={{
-                            marginTop: 8,
-                            marginBottom: 0,
-                            paddingLeft: 18,
-                            color: "#166534",
-                            fontSize: 13,
+                            fontWeight: 800,
+                            color:
+                              result.manualState === "selected"
+                                ? "#1d4ed8"
+                                : result.manualState === "ruled_out"
+                                  ? "#b91c1c"
+                                  : "#166534",
+                            fontSize: 16,
                           }}
                         >
-                          {result.behaviorMatches.map((match: string, i: number) => (
-                            <li key={`behavior-${i}`}>{match}</li>
-                          ))}
-                        </ul>
-                      )}
+                          {result.ghost.name}
+                        </div>
 
-                      {result.speedMatches.length > 0 && (
-                        <ul
+                        <div
                           style={{
-                            marginTop: 8,
-                            marginBottom: 0,
-                            paddingLeft: 18,
-                            color: "#166534",
-                            fontSize: 13,
+                            marginTop: 6,
+                            fontSize: 12,
+                            fontWeight: 700,
+                            color:
+                              result.manualState === "selected"
+                                ? "#1d4ed8"
+                                : result.manualState === "ruled_out"
+                                  ? "#b91c1c"
+                                  : "#166534",
                           }}
                         >
-                          {result.speedMatches.map((match: string, i: number) => (
-                            <li key={`speed-${i}`}>{match}</li>
-                          ))}
-                        </ul>
-                      )}
+                          Manual: {result.manualState}
+                        </div>
 
-                      {result.huntMatches.length > 0 && (
-                        <ul
+                        <div
                           style={{
                             marginTop: 8,
-                            marginBottom: 0,
-                            paddingLeft: 18,
-                            color: "#166534",
                             fontSize: 13,
+                            color: "#166534",
+                            fontWeight: 700,
                           }}
                         >
-                          {result.huntMatches.map((match: string, i: number) => (
-                            <li key={`hunt-${i}`}>{match}</li>
+                          Total score: {result.totalScore}
+                        </div>
+
+                        <div
+                          style={{
+                            marginTop: 4,
+                            fontSize: 12,
+                            color: "#166534",
+                          }}
+                        >
+                          Behavior: {result.behaviorScore} | Speed: {result.speedScore} | Hunt:{" "}
+                          {result.huntScore}
+                        </div>
+
+                        <div
+                          style={{
+                            marginTop: 10,
+                            display: "flex",
+                            gap: 6,
+                            flexWrap: "wrap",
+                          }}
+                        >
+                          {ghostEvidence.map((name) => (
+                            <span
+                              key={name}
+                              style={{
+                                fontSize: 12,
+                                padding: "4px 8px",
+                                borderRadius: 999,
+                                background: "#dcfce7",
+                                color: "#166534",
+                                border: "1px solid #bbf7d0",
+                              }}
+                            >
+                              {name}
+                            </span>
                           ))}
-                        </ul>
-                      )}
-                    </div>
-                  ))}
+
+                          {extraEvidence.map((name) => (
+                            <span
+                              key={name}
+                              style={{
+                                fontSize: 12,
+                                padding: "4px 8px",
+                                borderRadius: 999,
+                                background: "#fef3c7",
+                                color: "#92400e",
+                                border: "1px solid #fde68a",
+                              }}
+                            >
+                              Extra: {name}
+                            </span>
+                          ))}
+                        </div>
+
+                        {result.behaviorMatches.length > 0 && (
+                          <ul
+                            style={{
+                              marginTop: 8,
+                              marginBottom: 0,
+                              paddingLeft: 18,
+                              color: "#166534",
+                              fontSize: 13,
+                            }}
+                          >
+                            {result.behaviorMatches.map((match: string, i: number) => (
+                              <li key={`behavior-${i}`}>{match}</li>
+                            ))}
+                          </ul>
+                        )}
+
+                        {result.speedMatches.length > 0 && (
+                          <ul
+                            style={{
+                              marginTop: 8,
+                              marginBottom: 0,
+                              paddingLeft: 18,
+                              color: "#166534",
+                              fontSize: 13,
+                            }}
+                          >
+                            {result.speedMatches.map((match: string, i: number) => (
+                              <li key={`speed-${i}`}>{match}</li>
+                            ))}
+                          </ul>
+                        )}
+
+                        {result.huntMatches.length > 0 && (
+                          <ul
+                            style={{
+                              marginTop: 8,
+                              marginBottom: 0,
+                              paddingLeft: 18,
+                              color: "#166534",
+                              fontSize: 13,
+                            }}
+                          >
+                            {result.huntMatches.map((match: string, i: number) => (
+                              <li key={`hunt-${i}`}>{match}</li>
+                            ))}
+                          </ul>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
               )}
             </div>
@@ -1189,7 +1430,7 @@ export default function HomePage() {
                   alignItems: "center",
                   flexWrap: "wrap",
                   gap: 12,
-                  marginBottom: 16,
+                  marginBottom: 8,
                 }}
               >
                 <h2
@@ -1217,59 +1458,143 @@ export default function HomePage() {
                 </div>
               </div>
 
-              <div style={{ display: "grid", gap: 12 }}>
-                {ruledOutGhosts.map((result) => (
-                  <div
-                    key={result.ghost.id}
-                    style={{
-                      border: "1px solid #fecaca",
-                      background: "#fef2f2",
-                      borderRadius: 14,
-                      padding: 14,
-                    }}
-                  >
-                    <div
-                      style={{
-                        fontWeight: 800,
-                        color: "#991b1b",
-                        fontSize: 16,
-                        marginBottom: 8,
-                      }}
-                    >
-                      {result.ghost.name}
-                    </div>
+              <p
+                style={{
+                  marginTop: 0,
+                  marginBottom: 16,
+                  fontSize: 13,
+                  color: "#64748b",
+                }}
+              >
+                Click a ghost card to cycle manual state: unknown → selected → ruled out
+              </p>
 
-                    <ul
+              <div style={{ display: "grid", gap: 12 }}>
+                {ruledOutGhosts.map((result) => {
+                  const ghostEvidence = getGhostEvidenceNames(result.ghost.id);
+                  const extraEvidence = getGhostExtraEvidenceNames(result.ghost.id);
+
+                  return (
+                    <div
+                      key={result.ghost.id}
+                      onClick={() => cycleGhostState(result.ghost.id)}
                       style={{
-                        margin: 0,
-                        paddingLeft: 18,
-                        color: "#7f1d1d",
-                        fontSize: 14,
+                        border: "1px solid #fecaca",
+                        background:
+                          result.manualState === "selected"
+                            ? "#eff6ff"
+                            : result.manualState === "ruled_out"
+                              ? "#fef2f2"
+                              : "#fef2f2",
+                        borderRadius: 14,
+                        padding: 14,
+                        cursor: "pointer",
                       }}
                     >
-                      {result.reasons.map((reason, i) => (
-                        <li key={`evidence-${i}`} style={{ marginBottom: 4 }}>
-                          {reason}
-                        </li>
-                      ))}
-                      {result.behaviorRuleOutReasons.map((reason: string, i: number) => (
-                        <li key={`behavior-${i}`} style={{ marginBottom: 4 }}>
-                          {reason}
-                        </li>
-                      ))}
-                      {result.speedRuleOutReasons.map((reason: string, i: number) => (
-                        <li key={`speed-${i}`} style={{ marginBottom: 4 }}>
-                          {reason}
-                        </li>
-                      ))}
-                      {result.huntRuleOutReasons.map((reason: string, i: number) => (
-                        <li key={`hunt-${i}`} style={{ marginBottom: 4 }}>
-                          {reason}
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                ))}
+                      <div
+                        style={{
+                          fontWeight: 800,
+                          color:
+                            result.manualState === "selected"
+                              ? "#1d4ed8"
+                              : "#991b1b",
+                          fontSize: 16,
+                          marginBottom: 8,
+                        }}
+                      >
+                        {result.ghost.name}
+                      </div>
+
+                      <div
+                        style={{
+                          marginTop: -4,
+                          marginBottom: 10,
+                          fontSize: 12,
+                          fontWeight: 700,
+                          color:
+                            result.manualState === "selected"
+                              ? "#1d4ed8"
+                              : result.manualState === "ruled_out"
+                                ? "#b91c1c"
+                                : "#991b1b",
+                        }}
+                      >
+                        Manual: {result.manualState}
+                      </div>
+
+                      <div
+                        style={{
+                          marginBottom: 10,
+                          display: "flex",
+                          gap: 6,
+                          flexWrap: "wrap",
+                        }}
+                      >
+                        {ghostEvidence.map((name) => (
+                          <span
+                            key={name}
+                            style={{
+                              fontSize: 12,
+                              padding: "4px 8px",
+                              borderRadius: 999,
+                              background: "#fee2e2",
+                              color: "#991b1b",
+                              border: "1px solid #fecaca",
+                            }}
+                          >
+                            {name}
+                          </span>
+                        ))}
+
+                        {extraEvidence.map((name) => (
+                          <span
+                            key={name}
+                            style={{
+                              fontSize: 12,
+                              padding: "4px 8px",
+                              borderRadius: 999,
+                              background: "#fef3c7",
+                              color: "#92400e",
+                              border: "1px solid #fde68a",
+                            }}
+                          >
+                            Extra: {name}
+                          </span>
+                        ))}
+                      </div>
+
+                      <ul
+                        style={{
+                          margin: 0,
+                          paddingLeft: 18,
+                          color: "#7f1d1d",
+                          fontSize: 14,
+                        }}
+                      >
+                        {result.reasons.map((reason, i) => (
+                          <li key={`evidence-${i}`} style={{ marginBottom: 4 }}>
+                            {reason}
+                          </li>
+                        ))}
+                        {result.behaviorRuleOutReasons.map((reason: string, i: number) => (
+                          <li key={`behavior-${i}`} style={{ marginBottom: 4 }}>
+                            {reason}
+                          </li>
+                        ))}
+                        {result.speedRuleOutReasons.map((reason: string, i: number) => (
+                          <li key={`speed-${i}`} style={{ marginBottom: 4 }}>
+                            {reason}
+                          </li>
+                        ))}
+                        {result.huntRuleOutReasons.map((reason: string, i: number) => (
+                          <li key={`hunt-${i}`} style={{ marginBottom: 4 }}>
+                            {reason}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  );
+                })}
               </div>
             </div>
           </section>
